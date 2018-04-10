@@ -8,16 +8,11 @@ version = "0.1.0"
 
 [dependencies]
 aligned = "0.1.1"
-cortex-m = "0.3.0"
-cortex-m-rtfm = "0.2.0"
-
-[dependencies.blue-pill]
-git = "https://github.com/japaric/blue-pill"
-rev = "849aa44a290400cc1b6659a7773ba31b097a696d"
-
-[dependencies.cortex-m-rt]
-features = ["abort-on-panic"]
-version = "0.3.0"
+cortex-m = "0.4.3"
+cortex-m-rt = "0.4"
+cortex-m-rtfm = "0.3.1"
+panic-abort = "0.1.1"
+stm32f103xx = "0.8"
 
 [dependencies.shared]
 optional = false
