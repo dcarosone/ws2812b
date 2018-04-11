@@ -12,12 +12,12 @@ extern crate stm32f103xx_hal as hal;
 
 use aligned::Aligned;
 // use hal::dma::{Buffer, Dma1Channel2, Dma1Channel4, Dma1Channel5};
-// use blue_pill::prelude::*;
 use stm32f103xx::USART1;
 // use stm32f103xx::Interrupt;
+use hal::prelude::*;
 use hal::pwm::{C1, Pwm};
 use hal::serial::{Rx, Serial, Tx};
-use hal::time::{Hertz, Microseconds};
+use hal::time::{Hertz, Microseconds, Bps};
 use hal::timer::Timer;
 use rtfm::{app, Resource, Threshold};
 use shared::State;
@@ -25,7 +25,7 @@ use shared::State;
 // CONFIGURATION
 const _0: u8 = 3;
 const _1: u8 = 7;
-const BAUD_RATE: Hertz = Hertz(115_200);
+const BAUD_RATE: Bps = Bps(115_200);
 const LATCH_DELAY: Microseconds = Microseconds(50);
 const LOG_FREQUENCY: Hertz = Hertz(1);
 const WS2812B_FREQUENCY: Hertz = Hertz(400_000);
@@ -110,29 +110,40 @@ app! {
             ],
         },
     },
-
 }
+
 // INITIALIZATION
 fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
     let pwm = p.device.TIM2;
-    let usart1: USART1 = p.device.USART1;
-    let timer1 = p.device.TIM1;
-    let timer3 = p.device.TIM3;
-
+    
     p.core.DWT.enable_cycle_counter();
 
-    timer1.init(LATCH_DELAY, p.device.RCC);
+    let mut rcc = p.device.RCC.constrain();
+    let flash = p.device.FLASH.constrain();
+    let clocks = rcc.cfgr.freeze(&mut flash.acr);
+    let mut afio = p.device.AFIO.constrain(&mut rcc.apb2);
+    let mut gpioa = p.device.GPIOA.split(&mut rcc.apb2);
 
-    timer3.init(LOG_FREQUENCY.invert(), p.device.RCC);
+    let timer1 = Timer::tim1(p.device.TIM1, LATCH_DELAY, clocks, &mut rcc.apb1); // syst?
+    let timer3 = Timer::tim3(p.device.TIM3, LOG_FREQUENCY, clocks, &mut rcc.apb1);
 
-    // gpio and clock setup ??
-    let serial = Serial::new(usart1, (pa9, pa10), 9_600.bps(), clocks, &mut rcc.APB2);
+    // ?
+    let pa9 = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
+    let pa10 = gpioa.pa10;
 
-    //serial.init(BAUD_RATE.invert(), p.AFIO, Some(p.DMA1), p.GPIOA, p.RCC);
+    let serial = Serial::usart1(
+        p.device.USART1,
+        (pa9, pa10),
+        &mut afio.mapr,
+        BAUD_RATE,
+        clocks,
+        &mut rcc.apb2,
+    );
+    //serial.init(BAUD_RATE.invertt(), p.AFIO, Some(p.DMA1), p.GPIOA, p.RCC);
     let (tx, rx) = serial.split();
 
-    pwm.init(
-        WS2812B_FREQUENCY.invert(),
+    let mut pwm = p.device.TIM2.pwm(
+        WS2812B_FREQUENCY,
         p.device.AFIO,
         Some(p.device.DMA1),
         p.device.GPIOA,
@@ -142,9 +153,9 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
 
     serial.read_exact(p.device.DMA1, r.RX_BUFFER).unwrap();
 
-    timer3.resume();
+    // timer3.resume();
 
-    init::LateResources { TX: tx, RX: rx }
+    init::LateResources { TX: tx, RX: rx, TIM1: timer1, TIM3: timer3 }
 }
 
 // IDLE LOOP
@@ -160,7 +171,7 @@ fn idle(t: &mut Threshold, mut r: idle::Resources) -> ! {
             let after = dwt.cyccnt.read();
 
             let elapsed = after.wrapping_sub(before);
-            **sleep_cycles += elapsed;
+            *sleep_cycles += elapsed;
         });
 
         // interrupts are serviced here
@@ -169,37 +180,37 @@ fn idle(t: &mut Threshold, mut r: idle::Resources) -> ! {
 
 // TASKS
 fn log(_t: &mut Threshold, r: TIM3::Resources) {
-    let timer = Timer(&**r.TIM3);
-    let serial = Serial(&**r.USART1);
+    let timer = &*r.TIM3;
+    let serial = &*r.TX; // Serial(&*r.USART1);
 
     timer.wait().unwrap();
 
     let snapshot = r.DWT.cyccnt.read();
     let state = State {
-        context_switches: **r.CONTEXT_SWITCHES,
-        frames: **r.FRAMES,
-        sleep_cycles: **r.SLEEP_CYCLES,
+        context_switches: *r.CONTEXT_SWITCHES,
+        frames: *r.FRAMES,
+        sleep_cycles: *r.SLEEP_CYCLES,
         snapshot: snapshot,
     };
-    state.serialize(&mut *(**r.TX_BUFFER).borrow_mut());
+    state.serialize(&mut *(*r.TX_BUFFER).borrow_mut());
 
     serial.write_all(r.DMA1, r.TX_BUFFER).unwrap();
 
-    **r.CONTEXT_SWITCHES = 0;
-    **r.FRAMES = 0;
-    **r.SLEEP_CYCLES = 0;
+    *r.CONTEXT_SWITCHES = 0;
+    *r.FRAMES = 0;
+    *r.SLEEP_CYCLES = 0;
 }
 
 fn tx_transfer_done(_t: &mut Threshold, r: DMA1_CHANNEL4::Resources) {
-    **r.CONTEXT_SWITCHES += 1;
+    *r.CONTEXT_SWITCHES += 1;
 
     r.TX_BUFFER.release(r.DMA1).unwrap();
 }
 
 fn rx(_t: &mut Threshold, r: DMA1_CHANNEL5::Resources) {
-    **r.CONTEXT_SWITCHES += 1;
+    *r.CONTEXT_SWITCHES += 1;
 
-    let serial = Serial(&**r.USART1);
+    let serial = &*r.RX;
 
     r.RX_BUFFER.release(r.DMA1).unwrap();
 
@@ -209,12 +220,10 @@ fn rx(_t: &mut Threshold, r: DMA1_CHANNEL5::Resources) {
     // previously transformed WS2812B frame is in the process of being
     // serialized to the LED ring. Right now the CPU does nothing while a
     // WS2812B frame is being serialized.
-    if !**r.BUSY {
-        r.RGB_ARRAY
-            .array
-            .copy_from_slice(&*(**r.RX_BUFFER).borrow());
+    if !*r.BUSY {
+        r.RGB_ARRAY.array.copy_from_slice(&*(*r.RX_BUFFER).borrow());
 
-        **r.BUSY = true;
+        *r.BUSY = true;
 
         rtfm::set_pending(Interrupt::EXTI0);
     }
@@ -223,15 +232,15 @@ fn rx(_t: &mut Threshold, r: DMA1_CHANNEL5::Resources) {
 }
 
 fn frame_start(_t: &mut Threshold, r: EXTI0::Resources) {
-    **r.CONTEXT_SWITCHES += 1;
+    *r.CONTEXT_SWITCHES += 1;
 
-    let pwm = Pwm(&**r.TIM2);
+    let pwm = Pwm(&*r.TIM2);
 
     // Construct and send WS2812B frame
     for (rgb, bits) in r.RGB_ARRAY
         .array
         .chunks(3)
-        .zip((**r.WS2812B_BUFFER).borrow_mut().chunks_mut(24))
+        .zip((*r.WS2812B_BUFFER).borrow_mut().chunks_mut(24))
     {
         let r = rgb[0];
         let g = rgb[1];
@@ -247,14 +256,13 @@ fn frame_start(_t: &mut Threshold, r: EXTI0::Resources) {
         }
     }
 
-    pwm.set_duties(r.DMA1, C1, r.WS2812B_BUFFER)
-        .unwrap();
+    pwm.set_duties(r.DMA1, C1, r.WS2812B_BUFFER).unwrap();
 }
 
 fn frame_tail_start(_t: &mut Threshold, r: DMA1_CHANNEL2::Resources) {
-    **r.CONTEXT_SWITCHES += 1;
+    *r.CONTEXT_SWITCHES += 1;
 
-    let timer = Timer(&**r.TIM1);
+    let timer = Timer(&*r.TIM1);
 
     r.WS2812B_BUFFER.release(r.DMA1).unwrap();
 
@@ -263,14 +271,14 @@ fn frame_tail_start(_t: &mut Threshold, r: DMA1_CHANNEL2::Resources) {
 }
 
 fn frame_end(_t: &mut Threshold, r: TIM1_UP_TIM10::Resources) {
-    **r.CONTEXT_SWITCHES += 1;
+    *r.CONTEXT_SWITCHES += 1;
 
-    let timer = Timer(&**r.TIM1);
+    let timer = Timer(&*r.TIM1);
 
     timer.wait().unwrap();
 
     timer.pause();
 
-    **r.BUSY = false;
-    **r.FRAMES += 1;
+    *r.BUSY = false;
+    *r.FRAMES += 1;
 }
