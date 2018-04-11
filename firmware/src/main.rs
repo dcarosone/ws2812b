@@ -5,18 +5,20 @@
 #![no_std]
 
 extern crate aligned;
-extern crate stm32f103xx;
-//extern crate stm32f103xx_hal;
 extern crate cortex_m_rtfm as rtfm;
 extern crate shared;
+extern crate stm32f103xx;
+extern crate stm32f103xx_hal as hal;
 
 use aligned::Aligned;
-// use stm32f103xx::dma::{Buffer, Dma1Channel2, Dma1Channel4, Dma1Channel5};
+// use hal::dma::{Buffer, Dma1Channel2, Dma1Channel4, Dma1Channel5};
 // use blue_pill::prelude::*;
 use stm32f103xx::USART1;
 // use stm32f103xx::Interrupt;
-// use stm32f103xx::time::{Hertz, Microseconds};
-// use stm32f103xx::{Channel, Pwm, Serial, Timer};
+use hal::pwm::{C1, C2, C3, C4, Pwm};
+use hal::serial::{Rx, Serial, Tx};
+use hal::time::{Hertz, Microseconds};
+use hal::timer::Timer;
 use rtfm::{app, Resource, Threshold};
 use shared::State;
 
@@ -117,11 +119,11 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
     let timer1 = p.device.TIM1;
     let timer3 = p.device.TIM3;
 
-    p.DWT.enable_cycle_counter();
+    p.core.DWT.enable_cycle_counter();
 
-    timer1.init(LATCH_DELAY, p.RCC);
+    timer1.init(LATCH_DELAY, p.device.RCC);
 
-    timer3.init(LOG_FREQUENCY.invert(), p.RCC);
+    timer3.init(LOG_FREQUENCY.invert(), p.device.RCC);
 
     // gpio and clock setup ??
     let serial = Serial::new(usart1, (pa9, pa10), 9_600.bps(), clocks, &mut rcc.APB2);
@@ -131,10 +133,10 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
 
     pwm.init(
         WS2812B_FREQUENCY.invert(),
-        p.AFIO,
-        Some(p.DMA1),
-        p.GPIOA,
-        p.RCC,
+        p.device.AFIO,
+        Some(p.device.DMA1),
+        p.device.GPIOA,
+        p.device.RCC,
     );
     pwm.enable(Channel::_1);
 

@@ -13,6 +13,7 @@ cortex-m-rt = "0.4"
 cortex-m-rtfm = "0.3.1"
 panic-abort = "0.1.1"
 stm32f103xx = "0.8"
+stm32f103xx-hal = { git = "https://github.com/japaric/stm32f103xx-hal"} 
 
 [dependencies.shared]
 optional = false
