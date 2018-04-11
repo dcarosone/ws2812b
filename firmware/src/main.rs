@@ -15,7 +15,7 @@ use aligned::Aligned;
 // use blue_pill::prelude::*;
 use stm32f103xx::USART1;
 // use stm32f103xx::Interrupt;
-use hal::pwm::{C1, C2, C3, C4, Pwm};
+use hal::pwm::{C1, Pwm};
 use hal::serial::{Rx, Serial, Tx};
 use hal::time::{Hertz, Microseconds};
 use hal::timer::Timer;
@@ -138,9 +138,9 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
         p.device.GPIOA,
         p.device.RCC,
     );
-    pwm.enable(Channel::_1);
+    pwm.enable(C1);
 
-    serial.read_exact(p.DMA1, r.RX_BUFFER).unwrap();
+    serial.read_exact(p.device.DMA1, r.RX_BUFFER).unwrap();
 
     timer3.resume();
 
@@ -247,7 +247,7 @@ fn frame_start(_t: &mut Threshold, r: EXTI0::Resources) {
         }
     }
 
-    pwm.set_duties(r.DMA1, Channel::_1, r.WS2812B_BUFFER)
+    pwm.set_duties(r.DMA1, C1, r.WS2812B_BUFFER)
         .unwrap();
 }
 
