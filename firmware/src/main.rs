@@ -12,12 +12,12 @@ extern crate stm32f103xx_hal as hal;
 
 use aligned::Aligned;
 // use hal::dma::{Buffer, Dma1Channel2, Dma1Channel4, Dma1Channel5};
-use stm32f103xx::USART1;
+use stm32f103xx::{USART1, TIM2, DWT};
 // use stm32f103xx::Interrupt;
 use hal::prelude::*;
 use hal::pwm::{C1, Pwm};
 use hal::serial::{Rx, Serial, Tx};
-use hal::time::{Hertz, Microseconds, Bps};
+use hal::time::{Bps, Hertz, Microseconds};
 use hal::timer::Timer;
 use rtfm::{app, Resource, Threshold};
 use shared::State;
@@ -37,6 +37,8 @@ app! {
     resources: {
         static BUSY: bool = false;
         static CONTEXT_SWITCHES: u16 = 0;
+        static DWT: DWT;
+        static PWM: Pwm<TIM2, C1>;
         static FRAMES: u8 = 0;
         static RGB_ARRAY: Aligned<u32, [u8; 72]> = Aligned([0; 72]);
         static RX: Rx<USART1>;
@@ -50,6 +52,7 @@ app! {
     idle: {
         resources: [
             SLEEP_CYCLES,
+            DWT,
         ],
     },
 
@@ -87,6 +90,7 @@ app! {
                 CONTEXT_SWITCHES,
                 RGB_ARRAY,
                 WS2812B_BUFFER,
+                PWM
             ],
         },
 
@@ -107,6 +111,7 @@ app! {
                 SLEEP_CYCLES,
                 TX_BUFFER,
                 TX,
+                DWT,
             ],
         },
     },
@@ -114,20 +119,19 @@ app! {
 
 // INITIALIZATION
 fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
-    let pwm = p.device.TIM2;
-    
-    p.core.DWT.enable_cycle_counter();
-
+    let dwt = p.core.DWT;
+    dwt.enable_cycle_counter();
     let mut rcc = p.device.RCC.constrain();
     let flash = p.device.FLASH.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
     let mut afio = p.device.AFIO.constrain(&mut rcc.apb2);
     let mut gpioa = p.device.GPIOA.split(&mut rcc.apb2);
 
-    let timer1 = Timer::tim1(p.device.TIM1, LATCH_DELAY, clocks, &mut rcc.apb1); // syst?
+    let timer1 = Timer::tim1(p.device.TIM1, LATCH_DELAY, clocks, &mut rcc.apb1); // where is Timer::tim1 for TIM1?
     let timer3 = Timer::tim3(p.device.TIM3, LOG_FREQUENCY, clocks, &mut rcc.apb1);
+    // use these timers; make something listen to them and fire the interrupts instead of passing them around as resources?
 
-    // ?
+    // correct pins?
     let pa9 = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
     let pa10 = gpioa.pa10;
 
@@ -139,23 +143,22 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
         clocks,
         &mut rcc.apb2,
     );
-    //serial.init(BAUD_RATE.invertt(), p.AFIO, Some(p.DMA1), p.GPIOA, p.RCC);
     let (tx, rx) = serial.split();
 
     let mut pwm = p.device.TIM2.pwm(
+        gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl), // XXX which pin?
+        &mut afio.mapr,
         WS2812B_FREQUENCY,
-        p.device.AFIO,
-        Some(p.device.DMA1),
-        p.device.GPIOA,
-        p.device.RCC,
+        clocks,
+        &mut rcc.apb1,
     );
-    pwm.enable(C1);
+    pwm.enable();
 
-    serial.read_exact(p.device.DMA1, r.RX_BUFFER).unwrap();
+    rx.read_exact(p.device.DMA1, r.RX_BUFFER);  // figure out new-dma
 
     // timer3.resume();
 
-    init::LateResources { TX: tx, RX: rx, TIM1: timer1, TIM3: timer3 }
+    init::LateResources { TX: tx, RX: rx, DWT: dwt, PWM: pwm }
 }
 
 // IDLE LOOP
@@ -180,10 +183,10 @@ fn idle(t: &mut Threshold, mut r: idle::Resources) -> ! {
 
 // TASKS
 fn log(_t: &mut Threshold, r: TIM3::Resources) {
-    let timer = &*r.TIM3;
+    // let timer = &*r.TIM3;
     let serial = &*r.TX; // Serial(&*r.USART1);
 
-    timer.wait().unwrap();
+    // timer.wait().unwrap();
 
     let snapshot = r.DWT.cyccnt.read();
     let state = State {
