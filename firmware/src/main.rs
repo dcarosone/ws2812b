@@ -237,7 +237,7 @@ fn rx(_t: &mut Threshold, r: DMA1_CHANNEL5::Resources) {
 fn frame_start(_t: &mut Threshold, r: EXTI0::Resources) {
     *r.CONTEXT_SWITCHES += 1;
 
-    let pwm = Pwm(&*r.TIM2);
+    let pwm = *r.PWM;
 
     // Construct and send WS2812B frame
     for (rgb, bits) in r.RGB_ARRAY
