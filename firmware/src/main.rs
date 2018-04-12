@@ -26,7 +26,7 @@ use shared::State;
 const _0: u8 = 3;
 const _1: u8 = 7;
 const BAUD_RATE: Bps = Bps(115_200);
-const LATCH_DELAY: Microseconds = Microseconds(50);
+const LATCH_DELAY: Hertz = Hertz(20_000); // 50us == 20KHz
 const LOG_FREQUENCY: Hertz = Hertz(1);
 const WS2812B_FREQUENCY: Hertz = Hertz(400_000);
 
