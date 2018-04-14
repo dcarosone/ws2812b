@@ -11,9 +11,7 @@ extern crate stm32f103xx;
 extern crate stm32f103xx_hal as hal;
 
 use aligned::Aligned;
-// use hal::dma::{Buffer, Dma1Channel2, Dma1Channel4, Dma1Channel5};
-use stm32f103xx::{USART1, TIM2, DWT};
-use stm32f103xx::Interrupt;
+use hal::dma::{dma1, CircBuffer, Event};
 use hal::prelude::*;
 use hal::pwm::{C1, Pwm};
 use hal::serial::{Rx, Serial, Tx};
@@ -21,6 +19,8 @@ use hal::time::{Bps, Hertz};
 use hal::timer::Timer;
 use rtfm::{app, Resource, Threshold};
 use shared::State;
+use stm32f103xx::Interrupt;
+use stm32f103xx::{TIM2, USART1, DWT};
 
 // CONFIGURATION
 const _0: u8 = 3;
@@ -42,7 +42,8 @@ app! {
         static FRAMES: u8 = 0;
         static RGB_ARRAY: Aligned<u32, [u8; 72]> = Aligned([0; 72]);
         static RX: Rx<USART1>;
-        static RX_BUFFER: [u8; 72] = [0; 72];
+        static RX_BUFFER: [[u8; 72]; 2] = [[0; 72]; 2];
+        static RX_CB: CircBuffer<[u8; 72], dma1::C5>;
         static SLEEP_CYCLES: u32 = 0;
         static TX: Tx<USART1>;
         static TX_BUFFER: [u8; 13] = [0; 13];
@@ -81,6 +82,7 @@ app! {
                 RGB_ARRAY,
                 RX_BUFFER,
                 RX,
+                RX_CB,
             ],
         },
 
@@ -154,11 +156,23 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
     );
     pwm.enable();
 
-    rx.read_exact(p.device.DMA1, r.RX_BUFFER);  // figure out new-dma
+    let mut channels = p.device.DMA1.split(&mut rcc.ahb);
+
+    channels.2.listen(Event::TransferComplete);
+    channels.4.listen(Event::TransferComplete);
+    channels.5.listen(Event::TransferComplete);
+
+    let rx_cb = rx.circ_read(channels.5, r.RX_BUFFER); // figure out new-dma
 
     // timer3.resume();
 
-    init::LateResources { TX: tx, RX: rx, DWT: dwt, PWM: pwm }
+    init::LateResources {
+        TX: tx,
+        RX: rx,
+        RX_CB: rx_cb,
+        DWT: dwt,
+        PWM: pwm,
+    }
 }
 
 // IDLE LOOP
@@ -184,7 +198,7 @@ fn idle(t: &mut Threshold, mut r: idle::Resources) -> ! {
 // TASKS
 fn log(_t: &mut Threshold, r: TIM3::Resources) {
     // let timer = &*r.TIM3;
-    let serial = &*r.TX; // Serial(&*r.USART1);
+    let serial = &*r.TX; 
 
     // timer.wait().unwrap();
 
@@ -213,25 +227,15 @@ fn tx_transfer_done(_t: &mut Threshold, r: DMA1_CHANNEL4::Resources) {
 fn rx(_t: &mut Threshold, r: DMA1_CHANNEL5::Resources) {
     *r.CONTEXT_SWITCHES += 1;
 
-    let serial = &*r.RX;
+    let cb = r.RX_CB;
+    let ref buf = match cb.readable_half() {
+        Ok(First) => r.RX_BUFFER[0],
+        Ok(Second) => r.RX_BUFFER[1],
+        Err(e) => return,   // XXX
+    };
 
-    r.RX_BUFFER.release(r.DMA1).unwrap();
-
-    // When busy we just ignore incoming frames
-    // TODO we can probably double throughput if we turn this into a pipeline
-    // where an incoming RGB frame is transformed into a WS2812B frame while a
-    // previously transformed WS2812B frame is in the process of being
-    // serialized to the LED ring. Right now the CPU does nothing while a
-    // WS2812B frame is being serialized.
-    if !*r.BUSY {
-        r.RGB_ARRAY.array.copy_from_slice(&*(*r.RX_BUFFER).borrow());
-
-        *r.BUSY = true;
-
-        rtfm::set_pending(Interrupt::EXTI0);
-    }
-
-    serial.read_exact(r.DMA1, r.RX_BUFFER).unwrap();
+    r.RGB_ARRAY.array.copy_from_slice(buf);
+    rtfm::set_pending(Interrupt::EXTI0);
 }
 
 fn frame_start(_t: &mut Threshold, r: EXTI0::Resources) {
