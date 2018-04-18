@@ -4,14 +4,16 @@
 #![feature(used)]
 #![no_std]
 
-extern crate aligned;
 extern crate cortex_m_rtfm as rtfm;
+// extern crate either;
+extern crate panic_abort;
 extern crate shared;
 extern crate stm32f103xx;
 extern crate stm32f103xx_hal as hal;
 
-use aligned::Aligned;
-use hal::dma::{dma1, CircBuffer, Event};
+// use aligned::Aligned;
+// use either::Either;
+use hal::dma::{dma1, CircBuffer, Event, Transfer, R};
 use hal::prelude::*;
 use hal::pwm::{C1, Pwm};
 use hal::serial::{Rx, Serial, Tx};
@@ -30,6 +32,10 @@ const LATCH_DELAY: Hertz = Hertz(20_000); // 50us == 20KHz
 const LOG_FREQUENCY: Hertz = Hertz(1);
 const WS2812B_FREQUENCY: Hertz = Hertz(400_000);
 
+#[allow(non_camel_case_types)]
+type TX_BUF = &'static mut [u8; 13];
+type TX = Option<Either<(TX_BUF, dma1::C4, Tx<USART1>), Transfer<R, TX_BUF, dma1::C4, Tx<USART1>>>>;
+
 // TASKS AND RESOURCES
 app! {
     device: stm32f103xx,
@@ -45,9 +51,13 @@ app! {
         static RX_BUFFER: [[u8; 72]; 2] = [[0; 72]; 2];
         static RX_CB: CircBuffer<[u8; 72], dma1::C5>;
         static SLEEP_CYCLES: u32 = 0;
-        static TX: Tx<USART1>;
-        static TX_BUFFER: [u8; 13] = [0; 13];
+        static TX: TX;
+        static TX_BUFFER: [u8; 13] = [0u8; 13];
         static WS2812B_BUFFER: [u8; 577] = [0; 577];
+    },
+
+    init: {
+        resources: [TX_BUFFER],
     },
 
     idle: {
@@ -70,7 +80,7 @@ app! {
             path: tx_transfer_done,
             resources: [
                 CONTEXT_SWITCHES,
-                TX_BUFFER,
+                TX,
             ],
         },
 
@@ -111,7 +121,6 @@ app! {
                 CONTEXT_SWITCHES,
                 FRAMES,
                 SLEEP_CYCLES,
-                TX_BUFFER,
                 TX,
                 DWT,
             ],
@@ -167,7 +176,7 @@ fn init(p: init::Peripherals, r: init::Resources) -> init::LateResources {
     // timer3.resume();
 
     init::LateResources {
-        TX: tx,
+        TX: Some(Either::Left((r.TX_BUFFER, channels.4, tx))),
         RX: rx,
         RX_CB: rx_cb,
         DWT: dwt,
@@ -198,7 +207,11 @@ fn idle(t: &mut Threshold, mut r: idle::Resources) -> ! {
 // TASKS
 fn log(_t: &mut Threshold, r: TIM3::Resources) {
     // let timer = &*r.TIM3;
-    let serial = &*r.TX; 
+
+    let (buf, c, tx) = match r.TX.take().unwrap() {
+        Either::Left((buf, c, tx)) => (buf, c, tx),
+        Either::Right(trans) => trans.wait(),
+    };
 
     // timer.wait().unwrap();
 
@@ -209,9 +222,9 @@ fn log(_t: &mut Threshold, r: TIM3::Resources) {
         sleep_cycles: *r.SLEEP_CYCLES,
         snapshot: snapshot,
     };
-    state.serialize(&mut *(*r.TX_BUFFER).borrow_mut());
 
-    serial.write_all(r.DMA1, r.TX_BUFFER).unwrap();
+    state.serialize(&mut buf);
+    *r.TX = Some(Either::Right(tx.write_all(c, buf)));
 
     *r.CONTEXT_SWITCHES = 0;
     *r.FRAMES = 0;
@@ -221,20 +234,19 @@ fn log(_t: &mut Threshold, r: TIM3::Resources) {
 fn tx_transfer_done(_t: &mut Threshold, r: DMA1_CHANNEL4::Resources) {
     *r.CONTEXT_SWITCHES += 1;
 
-    r.TX_BUFFER.release(r.DMA1).unwrap();
+    let (buf, c, tx) = match r.TX.take().unwrap() {
+        Either::Left((buf, c, tx)) => (buf, c, tx),
+        Either::Right(trans) => trans.wait(),
+    };
+
+    *r.TX = Some(Either::Left((buf, c, tx)));
 }
 
 fn rx(_t: &mut Threshold, r: DMA1_CHANNEL5::Resources) {
     *r.CONTEXT_SWITCHES += 1;
 
     let cb = r.RX_CB;
-    let ref buf = match cb.readable_half() {
-        Ok(First) => r.RX_BUFFER[0],
-        Ok(Second) => r.RX_BUFFER[1],
-        Err(e) => return,   // XXX
-    };
-
-    r.RGB_ARRAY.array.copy_from_slice(buf);
+    cb.peek(|buf, _| r.RGB_ARRAY.array.copy_from_slice(buf));
     rtfm::set_pending(Interrupt::EXTI0);
 }
 
