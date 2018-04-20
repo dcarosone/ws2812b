@@ -32,6 +32,12 @@ const LATCH_DELAY: Hertz = Hertz(20_000); // 50us == 20KHz
 const LOG_FREQUENCY: Hertz = Hertz(1);
 const WS2812B_FREQUENCY: Hertz = Hertz(400_000);
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum Either<L, R> {
+    Left(L),
+    Right(R),
+}
+
 #[allow(non_camel_case_types)]
 type TX_BUF = &'static mut [u8; 13];
 type TX = Option<Either<(TX_BUF, dma1::C4, Tx<USART1>), Transfer<R, TX_BUF, dma1::C4, Tx<USART1>>>>;
