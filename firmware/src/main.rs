@@ -4,15 +4,14 @@
 #![feature(used)]
 #![no_std]
 
+extern crate aligned;
 extern crate cortex_m_rtfm as rtfm;
-// extern crate either;
 extern crate panic_abort;
 extern crate shared;
 extern crate stm32f103xx;
 extern crate stm32f103xx_hal as hal;
 
-// use aligned::Aligned;
-// use either::Either;
+use aligned::Aligned;
 use hal::dma::{dma1, CircBuffer, Event, Transfer, R};
 use hal::prelude::*;
 use hal::pwm::{C1, Pwm};
@@ -216,7 +215,7 @@ fn log(_t: &mut Threshold, r: TIM3::Resources) {
 
     let (buf, c, tx) = match r.TX.take().unwrap() {
         Either::Left((buf, c, tx)) => (buf, c, tx),
-        Either::Right(trans) => trans.wait(),
+        Either::Right(trans) => trans.wait(),  // or return early if still pending?
     };
 
     // timer.wait().unwrap();
@@ -265,7 +264,7 @@ fn frame_start(_t: &mut Threshold, r: EXTI0::Resources) {
     for (rgb, bits) in r.RGB_ARRAY
         .array
         .chunks(3)
-        .zip((*r.WS2812B_BUFFER).borrow_mut().chunks_mut(24))
+        .zip((*r.WS2812B_BUFFER).chunks_mut(24))
     {
         let r = rgb[0];
         let g = rgb[1];

@@ -1,4 +1,5 @@
 [package]
+edition = "2018"
 authors = ["Jorge Aparicio <jorge@japaric.io>"]
 description = "WS2812B demo application"
 license = "MIT OR Apache-2.0"
@@ -7,13 +8,13 @@ repository = "https://github.com/japaric/ws2812"
 version = "0.1.0"
 
 [dependencies]
-cortex-m = "0.4.3"
-cortex-m-rt = "0.4.0"
-cortex-m-rtfm = "0.3.2"
-panic-abort = "0.1.1"
-stm32f103xx = "0.9.0"
+cortex-m = "0.5.8"
+cortex-m-rt = "0.6.7"
+cortex-m-rtfm = "0.4.1"
+panic-abort = "0.3.1"
+stm32f103xx = "0.11.0"
 stm32f103xx-hal = { git = "https://github.com/japaric/stm32f103xx-hal"} 
-aligned = "0.1.1"
+aligned = "0.3.1"
 
 [dependencies.shared]
 optional = false
