@@ -12,9 +12,11 @@ cortex-m = "0.5.8"
 cortex-m-rt = "0.6.7"
 cortex-m-rtfm = "0.4.1"
 panic-abort = "0.3.1"
-stm32f103xx = "0.11.0"
-stm32f103xx-hal = { git = "https://github.com/japaric/stm32f103xx-hal"} 
 aligned = "0.3.1"
+
+[dependencies.stm32f1xx-hal]
+version = "0.2.0"
+features = ["rt", "stm32f103"]
 
 [dependencies.shared]
 optional = false
