@@ -20,8 +20,8 @@ use aligned::Aligned;
 // use hal::timer::Timer;
 use rtfm::app; // , Resource, Threshold};
 use shared::State;
-use stm32f1xx::Interrupt;
-use stm32f1xx::{DWT, TIM1, TIM2, USART1};
+// use stm32f1xx::Interrupt;
+// use stm32f1xx::{DWT, TIM1, TIM2, USART1};
 
 // CONFIGURATION
 const _0: u8 = 3;
